@@ -1,4 +1,4 @@
-content = """# iKuuu VPN 自动签到脚本 (青龙版)
+iKuuu VPN 自动签到脚本 (青龙版)
 
 这是一个专门为 [iKuuu VPN](https://ikuuu.eu/) 设计的自动签到脚本，适配 **青龙面板 (Qinglong)** 环境。支持多账号、自动抓取最新域名以及钉钉机器人通知。
 
