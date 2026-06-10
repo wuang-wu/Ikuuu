@@ -1,45 +1,80 @@
-iKuuu VPN 自动签到脚本 (青龙版)
+iKuuu VPN 自动签到脚本（青龙版）
 
-这是一个专门为 [iKuuu VPN](https://ikuuu.eu/) 设计的自动签到脚本，适配 **青龙面板 (Qinglong)** 环境。支持多账号、自动抓取最新域名以及钉钉机器人通知。
+这是一个用于 `iKuuu VPN` 的自动签到脚本，适配 `Qinglong` 环境。
 
-## 🌟 功能特性
+## 功能
 
-- **动态域名获取**：自动访问 iKuuu 发布页获取最新主域名，解决域名频繁被封的问题。
-- **多账号支持**：支持通过 JSON 数组配置多个账号同时签到。
-- **钉钉推送**：深度适配青龙面板的 `config.sh` 配置，支持加签验证。
-- **智能重试与容错**：自动识别 Cookie 失效、网络重定向等异常情况并报警。
-- **零依赖运行**：使用 Node.js 原生 `fetch` (Node 18+) 和 `crypto` 模块，无需额外安装 npm 包。
+- 自动获取最新可用域名
+- 支持单账号 Cookie 直接填写
+- 兼容旧版 JSON 多账号配置
+- 支持钉钉通知
+- 使用 Node.js 原生 `fetch` 和 `crypto`，无需额外安装依赖
 
-## 🚀 快速上手
+## 获取 Cookie
 
-### 1. 获取 Cookie (关键步骤)
+1. 使用浏览器登录 `https://ikuuu.eu/`
+2. 进入我的账号
+3. 按 `F12` 打开开发者工具
+4. 切换到 Console
+5. 输入 `document.cookie`
+6. 复制输出的整条 Cookie 字符串
 
-1. 使用 Chrome 或 Edge 浏览器登录 [iKuuu 官网](https://ikuuu.eu/)。
-2. 进入 **用户中心** 页面。
-3. 按下 `F12` 打开开发者工具，切换到 **控制台 (Console)**。
-4. 输入 `document.cookie` 并回车。
-5. 复制输出的字符串（不含两端的引号）。它应该包含 `uid=xxx; email=xxx; key=xxx;` 等信息。
+注意：获取 Cookie 后不要点退出登录，否则 Cookie 可能失效。
 
-> **注意**：提取 Cookie 后请直接关闭浏览器标签页，**不要点击“退出登录”**，否则 Cookie 会失效。
+## 青龙环境变量
 
-### 2. 配置青龙环境变量
+在青龙面板中添加以下变量：
 
-在青龙面板的 **环境变量** 菜单中添加以下变量：
-
-| 变量名 | 描述 | 示例值 |
+| 变量名 | 说明 | 示例 |
 | :--- | :--- | :--- |
-| `ACCOUNTS` | 账号信息 (JSON 格式) | `[{"name":"账号1", "cookie":"你的Cookie"}]` |
-| `HOST` | (可选) 手动指定域名 | `ikuuu.pw` (如果不配置，脚本将自动获取) |
+| `ACCOUNTS` | 账号信息，推荐直接填写 Cookie，也兼容 JSON | `_ga=...; PHPSESSID=...; uid=...; email=...; key=...;` |
+| `HOST` | 可选，手动指定域名 | `ikuuu.pw` |
+| `DD_BOT_TOKEN` | 可选，钉钉机器人 Token 或完整 webhook | `https://oapi.dingtalk.com/robot/send?...` |
+| `DD_BOT_SECRET` | 可选，钉钉加签密钥 | `SECxxxxx` |
 
-#### `ACCOUNTS` JSON 格式参考：
+## `ACCOUNTS` 推荐写法
+
+直接填写一整条 Cookie：
+
+```text
+_ga=***************;_ga_8HVN7928SC=*********************;PHPSESSID=************;uid=************;email=***************;key=********************;ip=**************;expire_in=***********
+```
+
+脚本会自动在内部转换成：
+
 ```json
 [
   {
-    "name": "我的主账号",
+    "name": "默认账号",
+    "cookie": "你的整条 Cookie"
+  }
+]
+```
+
+## `ACCOUNTS` 兼容 JSON 写法
+
+如果你有多个账号，也可以继续使用旧格式：
+
+```json
+[
+  {
+    "name": "账号1",
     "cookie": "uid=12345; email=test@gmail.com; key=xxxxxx;"
   },
   {
-    "name": "备用账号",
+    "name": "账号2",
     "cookie": "uid=67890; email=dev@gmail.com; key=yyyyyy;"
   }
 ]
+```
+
+## 运行要求
+
+- Node.js `18+`
+- 青龙或其他支持环境变量的 Node.js 运行环境
+
+## 说明
+
+- 未配置 `HOST` 时，脚本会自动尝试获取最新域名
+- `ACCOUNTS` 为空时脚本会直接退出
+- 当签到失败或 Cookie 失效时，脚本会输出错误信息
