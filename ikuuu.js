@@ -1,5 +1,35 @@
 const crypto = require('crypto'); 
 
+function normalizeAccounts(rawAccounts) {
+  if (!rawAccounts) {
+    throw new Error("missing ACCOUNTS");
+  }
+
+  const trimmed = rawAccounts.trim();
+  if (!trimmed) {
+    throw new Error("empty ACCOUNTS");
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+    if (parsed && typeof parsed === "object" && parsed.cookie) {
+      return [parsed];
+    }
+  } catch (error) {
+    // Fall back to treating ACCOUNTS as a raw cookie string.
+  }
+
+  return [
+    {
+      name: "默认账号",
+      cookie: trimmed
+    }
+  ];
+}
+
 // ==========================================
 // 1. 自动获取最新域名的核心功能
 // ==========================================
@@ -10,9 +40,14 @@ async function getLatestHost() {
     return process.env.HOST;
   }
 
-  console.log("[域名加载] 正在尝试从发布页 (https://ikuuu.eu/) 获取最新主域名...");
+//   console.log("[域名加载] 正在尝试从发布页 (https://ikuuu.eu/) 获取最新主域名...");
+//   try {
+//     const response = await fetch("https://ikuuu.eu/", {
+    console.log("[域名加载] 正在尝试通过代理接口获取最新主域名...");
   try {
-    const response = await fetch("https://ikuuu.eu/", {
+    // 使用 allorigins 代理接口绕过网络墙
+    const targetUrl = encodeURIComponent("https://ikuuu.eu/");
+    const response = await fetch(`https://api.allorigins.win/raw?url=${targetUrl}`, {
       method: "GET",
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -139,7 +174,7 @@ async function main() {
 
   let accounts;
   try {
-    accounts = JSON.parse(process.env.ACCOUNTS);
+    accounts = normalizeAccounts(process.env.ACCOUNTS);
   } catch (error) {
     console.error("❌ ACCOUNTS 环境变量 JSON 格式错误，请检查！");
     process.exit(1);
