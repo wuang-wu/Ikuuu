@@ -1,38 +1,132 @@
 const crypto = require('crypto'); 
 
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+// ==========================================
+// 0. 账号信息解析
+// ==========================================
+// 支持三种 ACCOUNTS 格式：
+//   1) JSON 数组:  [{"name":"A","cookie":"..."},{"name":"B","cookie":"..."}]
+//   2) 单个 JSON 对象: {"name":"A","cookie":"..."}
+//   3) 纯 Cookie 字符串（多账号可用换行或 && 分隔）
+// 去掉首尾成对的单引号或双引号（兼容用户把 Cookie 用引号包裹的写法）
+function stripQuotes(str) {
+  let result = str.trim();
+  while (result.length >= 2) {
+    const first = result[0];
+    const last = result[result.length - 1];
+    if ((first === '"' || first === "'") && first === last) {
+      result = result.slice(1, -1).trim();
+    } else {
+      break;
+    }
+  }
+  return result;
+}
+
 function normalizeAccounts(rawAccounts) {
-  if (!rawAccounts) {
-    throw new Error("missing ACCOUNTS");
-  }
-
-  const trimmed = rawAccounts.trim();
+  const trimmed = (rawAccounts || "").trim();
   if (!trimmed) {
-    throw new Error("empty ACCOUNTS");
+    throw new Error("未配置 ACCOUNTS 环境变量或内容为空");
   }
 
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (Array.isArray(parsed)) {
-      return parsed;
+  let list = null;
+
+  // JSON 检测时先临时去掉可能包裹整体的引号
+  const unquoted = stripQuotes(trimmed);
+  if (unquoted.startsWith("[") || unquoted.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(unquoted);
+      list = Array.isArray(parsed) ? parsed : [parsed];
+    } catch (error) {
+      throw new Error(`ACCOUNTS 看起来是 JSON 但解析失败: ${error.message}`);
     }
-    if (parsed && typeof parsed === "object" && parsed.cookie) {
-      return [parsed];
-    }
-  } catch (error) {
-    // Fall back to treating ACCOUNTS as a raw cookie string.
+  } else {
+    // 纯 Cookie 字符串，支持换行或 && 分隔多账号，每段单独去掉首尾引号
+    list = trimmed.split(/\r?\n|&&/).map(s => stripQuotes(s)).filter(Boolean);
   }
 
-  return [
-    {
-      name: "默认账号",
-      cookie: trimmed
+  const accounts = [];
+  list.forEach((item, index) => {
+    if (typeof item === "string") {
+      item = { cookie: item };
     }
-  ];
+    const cookie = item && typeof item.cookie === "string" ? stripQuotes(item.cookie) : "";
+    if (!cookie) {
+      console.log(`[账号解析] ⚠️ 第 ${index + 1} 个账号缺少有效 cookie，已跳过`);
+      return;
+    }
+    const name = (item.name || "").toString().trim() || `账号${index + 1}`;
+    accounts.push({ name, cookie });
+  });
+
+  if (accounts.length === 0) {
+    throw new Error("ACCOUNTS 中没有解析到任何有效账号（每个账号必须包含 cookie）");
+  }
+
+  console.log(`[账号解析] 共解析到 ${accounts.length} 个有效账号: ${accounts.map(a => a.name).join("、")}`);
+  return accounts;
 }
 
 // ==========================================
 // 1. 自动获取最新域名的核心功能
 // ==========================================
+const RELEASE_URL = "https://ikuuu.eu/";
+const FALLBACK_HOSTS = ["ikuuu.win", "ikuuu.pw", "ikuuu.club"];
+
+function fetchWithTimeout(url, options = {}, timeout = 10000) {
+  return fetch(url, {
+    headers: { "User-Agent": UA },
+    ...options,
+    signal: AbortSignal.timeout(timeout)
+  });
+}
+
+// 依次尝试多个渠道拉取发布页 HTML（直连优先，失败再走代理接口）
+async function fetchReleasePageHtml() {
+  const sources = [
+    { name: "直连发布页", url: RELEASE_URL },
+    { name: "代理接口 allorigins", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(RELEASE_URL)}` },
+    { name: "代理接口 codetabs", url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(RELEASE_URL)}` }
+  ];
+
+  for (const source of sources) {
+    try {
+      console.log(`[域名加载] 正在通过「${source.name}」获取发布页...`);
+      const response = await fetchWithTimeout(source.url);
+      if (!response.ok) {
+        console.log(`[域名加载] ⚠️ ${source.name} 返回状态码 ${response.status}，尝试下一渠道`);
+        continue;
+      }
+      const html = await response.text();
+      if (html && html.length > 0) {
+        console.log(`[域名加载] ✅ 通过「${source.name}」成功获取发布页内容`);
+        return html;
+      }
+    } catch (error) {
+      console.log(`[域名加载] ⚠️ ${source.name} 请求异常: ${error.message}，尝试下一渠道`);
+    }
+  }
+  return null;
+}
+
+// 从 HTML 中提取所有 ikuuu.xxx 候选域名（去重、排除发布页自身域名）
+function extractCandidateHosts(html) {
+  const matches = html.match(/ikuuu\.[a-z]{2,10}/gi) || [];
+  const releaseHost = new URL(RELEASE_URL).hostname.replace(/^www\./, "");
+  return [...new Set(matches.map(m => m.toLowerCase()))].filter(h => h !== releaseHost);
+}
+
+// 验证候选域名是否真实可访问（防止拿到已被墙或已废弃的域名）
+async function isHostAlive(host) {
+  try {
+    const response = await fetchWithTimeout(`https://${host}/auth/login`, { method: "GET" }, 8000);
+    return response.ok;
+  } catch (error) {
+    return false;
+  }
+}
+
 async function getLatestHost() {
   // 如果你在青龙环境变量中强制锁定了 HOST，则优先使用你的配置
   if (process.env.HOST) {
@@ -40,43 +134,29 @@ async function getLatestHost() {
     return process.env.HOST;
   }
 
-//   console.log("[域名加载] 正在尝试从发布页 (https://ikuuu.eu/) 获取最新主域名...");
-//   try {
-//     const response = await fetch("https://ikuuu.eu/", {
-    console.log("[域名加载] 正在尝试通过代理接口获取最新主域名...");
-  try {
-    // 使用 allorigins 代理接口绕过网络墙
-    const targetUrl = encodeURIComponent("https://ikuuu.eu/");
-    const response = await fetch(`https://api.allorigins.win/raw?url=${targetUrl}`, {
-      method: "GET",
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      },
-      // 设置超时防止卡死
-      signal: AbortSignal.timeout(10000) 
-    });
-    
-    const html = await response.text();
+  const html = await fetchReleasePageHtml();
+  const candidates = html ? extractCandidateHosts(html) : [];
 
-    // 使用正则表达式匹配页面中的 ikuuu.xxx 格式的域名
-    // (因为主域名通常排在最前面，正则默认会抓取第一个匹配项)
-    const match = html.match(/(ikuuu\.[a-z]+)/i);
-
-    if (match && match[1]) {
-      const dynamicHost = match[1].toLowerCase();
-      console.log(`[域名加载] 🎉 成功获取当前最新域名: ${dynamicHost}`);
-      return dynamicHost;
-    } else {
-      console.log("[域名加载] ⚠️ 页面解析失败，未能匹配到有效域名格式。");
-    }
-  } catch (error) {
-    console.log(`[域名加载] ❌ 获取动态域名请求异常: ${error.message}`);
+  if (candidates.length > 0) {
+    console.log(`[域名加载] 从发布页解析到候选域名: ${candidates.join("、")}`);
+  } else {
+    console.log("[域名加载] ⚠️ 未能从发布页解析到候选域名，将直接尝试备用域名");
   }
 
-  // 兜底方案：如果请求发布页失败（比如被墙），使用默认的备用域名
-  const fallbackHost = "ikuuu.win";
-  console.log(`[域名加载] 将使用默认备用域名进行尝试: ${fallbackHost}`);
-  return fallbackHost;
+  // 候选域名 + 备用域名合并去重后，逐个验证可用性，取第一个能连通的
+  const allHosts = [...new Set([...candidates, ...FALLBACK_HOSTS])];
+  for (const host of allHosts) {
+    console.log(`[域名加载] 正在验证域名可用性: ${host} ...`);
+    if (await isHostAlive(host)) {
+      console.log(`[域名加载] 🎉 域名验证通过，本次使用: ${host}`);
+      return host;
+    }
+    console.log(`[域名加载] ❌ ${host} 无法访问，尝试下一个`);
+  }
+
+  // 全部验证失败时的最终兜底
+  console.log(`[域名加载] ⚠️ 所有域名均验证失败，将强行使用默认备用域名: ${FALLBACK_HOSTS[0]}`);
+  return FALLBACK_HOSTS[0];
 }
 
 // ==========================================
@@ -167,16 +247,11 @@ async function checkIn(account, host) {
 async function main() {
   console.log("=== iKuuu 青龙自动签到开始 ===\n");
 
-  if (!process.env.ACCOUNTS) {
-    console.error("❌ 未配置 ACCOUNTS 环境变量。");
-    process.exit(1);
-  }
-
   let accounts;
   try {
     accounts = normalizeAccounts(process.env.ACCOUNTS);
   } catch (error) {
-    console.error("❌ ACCOUNTS 环境变量 JSON 格式错误，请检查！");
+    console.error(`❌ ${error.message}`);
     process.exit(1);
   }
 

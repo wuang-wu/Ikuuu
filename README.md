@@ -4,11 +4,13 @@ iKuuu VPN 自动签到脚本（青龙版）
 
 ## 功能
 
-- 自动获取最新可用域名
+- 自动获取最新可用域名（多渠道获取 + 可用性验证）
 - 支持单账号 Cookie 直接填写
-- 兼容旧版 JSON 多账号配置
+- 兼容 JSON 多账号配置
 - 支持钉钉通知
 - 使用 Node.js 原生 `fetch` 和 `crypto`，无需额外安装依赖
+
+> 说明：iKuuu 登录接口已启用极验（Geetest）V4 行为验证码，无法用邮箱 + 密码自动登录，因此签到只能使用 Cookie 方式。
 
 ## 获取 Cookie
 
@@ -19,7 +21,7 @@ iKuuu VPN 自动签到脚本（青龙版）
 5. 输入 `document.cookie`
 6. 复制输出的整条 Cookie 字符串
 
-注意：获取 Cookie 后不要点退出登录，否则 Cookie 可能失效。
+注意：获取 Cookie 后不要点退出登录，否则 Cookie 可能失效。Cookie 有有效期，失效后需重新获取。
 
 ## 青龙环境变量
 
@@ -27,7 +29,7 @@ iKuuu VPN 自动签到脚本（青龙版）
 
 | 变量名 | 说明 | 示例 |
 | :--- | :--- | :--- |
-| `ACCOUNTS` | 账号信息，推荐直接填写 Cookie，也兼容 JSON | `_ga=...; PHPSESSID=...; uid=...; email=...; key=...;` |
+| `ACCOUNTS` | 账号 Cookie，支持纯字符串或 JSON | `_ga=...; PHPSESSID=...; uid=...; key=...;` |
 | `HOST` | 可选，手动指定域名 | `ikuuu.pw` |
 | `DD_BOT_TOKEN` | 可选，钉钉机器人 Token 或完整 webhook | `https://oapi.dingtalk.com/robot/send?...` |
 | `DD_BOT_SECRET` | 可选，钉钉加签密钥 | `SECxxxxx` |
@@ -40,20 +42,17 @@ iKuuu VPN 自动签到脚本（青龙版）
 _ga=***************;_ga_8HVN7928SC=*********************;PHPSESSID=************;uid=************;email=***************;key=********************;ip=**************;expire_in=***********
 ```
 
-脚本会自动在内部转换成：
+脚本会自动在内部转换成单账号配置。首尾即使带有单引号 `'...'` 或双引号 `"..."` 也没关系，脚本会自动去除。
 
-```json
-[
-  {
-    "name": "默认账号",
-    "cookie": "你的整条 Cookie"
-  }
-]
+## `ACCOUNTS` 多账号写法
+
+多个账号可用换行或 `&&` 分隔多条 Cookie：
+
+```text
+uid=12345; key=xxxxxx; && uid=67890; key=yyyyyy;
 ```
 
-## `ACCOUNTS` 兼容 JSON 写法
-
-如果你有多个账号，也可以继续使用旧格式：
+也可以使用 JSON 格式（支持自定义名称）：
 
 ```json
 [
